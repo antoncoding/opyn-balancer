@@ -14,14 +14,23 @@ contract Controller {
     pool = _pool;
   }
 
+  /**
+   * @dev Before each trade: calculate new spot price, adjust weight
+   */
   function _pre() internal {
 
   }
 
+  /**
+   * @dev After each trade: calculate new IV base on new spot price.
+   */
   function _post(uint _newSpotPrice) internal {
     
   }
 
+  /**
+   * @dev same interface as Balancer pool 
+   */
   function swapExactAmountIn(
       address tokenIn,
       uint tokenAmountIn,
@@ -34,7 +43,7 @@ contract Controller {
       _pre();
       pool.setPublicSwap(true);
       _pullToken(tokenIn, msg.sender, tokenAmountIn);
-      _approvePool(tokenIn, address(pool), tokenAmountIn);
+      _approve(tokenIn, address(pool), tokenAmountIn);
       (uint _tokenAmountOut, uint _spotPriceAfter) = pool.swapExactAmountIn(tokenIn, tokenAmountIn, tokenOut, minAmountOut, maxPrice);
       _pushToken(tokenOut, msg.sender, _tokenAmountOut);
       _post(_spotPriceAfter);
@@ -42,13 +51,19 @@ contract Controller {
       return (_tokenAmountOut, _spotPriceAfter);
     }
 
-  function _approvePool(address erc20, address spender, uint amount) 
+  /**
+   * @dev approve erc20 transfer
+   */
+  function _approve(address erc20, address spender, uint amount) 
     internal 
   {
     bool success = IERC20(erc20).approve(spender, amount);
     require(success, "ERR_ERC20_FALSE");
   }
 
+  /**
+   * @dev pull erc20 token from user
+   */
   function _pullToken(address erc20, address from, uint amount)
     internal
   {
@@ -56,6 +71,9 @@ contract Controller {
     require(xfer, "ERR_ERC20_FALSE");
   }
 
+  /**
+   * @dev send erc20 token to user
+   */
   function _pushToken(address erc20, address to, uint amount)
     internal
   {
