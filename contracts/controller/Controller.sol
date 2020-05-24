@@ -9,7 +9,8 @@ import "../interfaces/ICompoundOracle.sol";
 contract Controller {
   using SafeMath for uint256;
 
-  uint256 public iv;
+  bool initialized = false;
+  uint256 public iv = 5000000000;
 
   uint256 public tokenDecimals;
   uint256 public usdcDecimals = 6;
@@ -25,7 +26,8 @@ contract Controller {
   IBPool public pool;
   ICompoundOracle public oracle;
 
-  function init(IBPool _pool, 
+  function init(
+      IBPool _pool, 
       ICompoundOracle _oracle, 
       uint256 _strikePrice, 
       uint256 _expiry, 
@@ -33,13 +35,16 @@ contract Controller {
       address _oToken,
       uint256 _tokenDecimals
     ) public {
-    pool = _pool;
-    oracle = _oracle;
-    strikePrice = _strikePrice;
-    expiry = _expiry;
-    USDC = _usdc_address;
-    oToken = _oToken;
-    tokenDecimals = _tokenDecimals;
+      require(!initialized, "Controller: Already Inited.");
+      pool = _pool;
+      oracle = _oracle;
+      strikePrice = _strikePrice;
+      expiry = _expiry;
+      USDC = _usdc_address;
+      oToken = _oToken;
+      tokenDecimals = _tokenDecimals;
+
+      initialized = true;
   }
 
   /**
@@ -140,10 +145,12 @@ contract Controller {
     public
     view 
     returns ( uint256 _iv ) {
-      uint256 spot = pool.getSpotPrice(USDC, oToken);
+      uint256 _spot = pool.getSpotPrice(USDC, oToken);
+      uint256 spot = _spot.div(uint256(10**(18-tokenDecimals)));
+      
       uint256 usdcPrice = oracle.getPrice(USDC); // usdc price in wei
       uint256 ethPrice = uint256(10**(ethDecimals + usdcDecimals)).div(usdcPrice); // 206120000
-      uint256 timeTilExpiry = expiry.sub(block.timestamp);
+      uint256 timeTilExpiry = expiry.sub(block.timestamp); //
       _iv = _approximatePutIV(spot, strikePrice, ethPrice, timeTilExpiry);
   }
 
@@ -155,8 +162,8 @@ contract Controller {
    * @param t time til expiry in sec
    */
   function _approximatePutIV(uint256 p, uint256 x, uint256 spot, uint256 t) 
-    public
     // internal 
+    public
     view
     returns ( uint256 )
     {
@@ -184,15 +191,14 @@ contract Controller {
     internal
     pure
     returns ( uint256 newFee ) {
-      newFee = 1000000000000000000; // 1%
+      newFee = 10000000000000000; // 1%
   }
 
   /**
    * @dev Update weight to fit new option price.
    */
   function _updateWeights(uint256 _targetSpot) 
-    // internal
-    public
+    internal
   {
     uint256 poolUSDC = pool.getBalance(USDC);
     uint256 poolToken = pool.getBalance(oToken);
@@ -218,8 +224,7 @@ contract Controller {
     * Wu = 10 ^ 19 - Wo
     **/
   function _getNewWeights(uint256 newPrice, uint256 usdcBalance, uint256 oTokenBalance) 
-    public 
-    // internal
+    internal
     view 
     returns (uint256 tokenWeight, uint256 usdcWeight) 
     {
