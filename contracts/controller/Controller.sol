@@ -10,6 +10,8 @@ contract Controller {
   using SafeMath for uint256;
 
   uint256 public iv;
+
+  uint256 public tokenDecimals;
   uint256 public usdcDecimals = 6;
   uint256 public ethDecimals = 18;
   uint256 public ivDecimals = 10;
@@ -28,7 +30,8 @@ contract Controller {
       uint256 _strikePrice, 
       uint256 _expiry, 
       address _usdc_address,
-      address _oToken
+      address _oToken,
+      uint256 _tokenDecimals
     ) public {
     pool = _pool;
     oracle = _oracle;
@@ -36,7 +39,7 @@ contract Controller {
     expiry = _expiry;
     USDC = _usdc_address;
     oToken = _oToken;
-    usdcDecimals = 6;
+    tokenDecimals = _tokenDecimals;
   }
 
   /**
@@ -44,8 +47,10 @@ contract Controller {
    */
   function _pre() internal {
     // calculate target price
-    uint256 newPrice = _calculateOptionPrice();
-    
+    uint256 targetSpotPrice = _calculateOptionPrice();
+
+    // calculate new weights
+    _updateWeights(targetSpotPrice);
 
     // update fee
     uint256 newSwapFee = _calculateFee();
@@ -176,6 +181,49 @@ contract Controller {
     pure
     returns ( uint256 newFee ) {
       newFee = 1000000000000000000; // 1%
+  }
+
+  /**
+   * @dev Update weight to fit new option price.
+   */
+  function _updateWeights(uint256 _targetSpot) 
+    // internal
+    public
+  {
+    uint256 poolUSDC = pool.getBalance(USDC);
+    uint256 poolToken = pool.getBalance(oToken);
+
+    (uint256 newTokenW, uint256 newUSDCW) = _getNewWeights(_targetSpot, poolUSDC, poolToken);
+
+    uint256 oldTokenW = pool.getDenormalizedWeight(oToken);
+    
+    if (newTokenW < oldTokenW) {
+      // update new oToken weight first
+      pool.rebind(oToken, poolToken, newTokenW);
+      pool.rebind(USDC, poolUSDC, newUSDCW);
+    } else {
+      // update USDC weight first
+      pool.rebind(USDC, poolUSDC, newUSDCW);
+      pool.rebind(oToken, poolToken, newTokenW);
+    }
+  }
+
+  /**
+    * @dev  Calculate new weights
+    * Wo = ( Bu * 10^(oTokenD)  + spot * Bo ) / ( spot * Bo * 10^19 ) 
+    * Wu = 10 ^ 19 - Wo
+    **/
+  function _getNewWeights(uint256 newPrice, uint256 usdcBalance, uint256 oTokenBalance) 
+    public 
+    // internal
+    view 
+    returns (uint256 tokenWeight, uint256 usdcWeight) 
+    {
+      uint256 weightSum = 10**19;
+      uint256 denominator = usdcBalance.mul(10**(tokenDecimals)).add(newPrice.mul(oTokenBalance)) ;
+      uint256 numerator = newPrice.mul(oTokenBalance).mul(weightSum);
+      uint256 oTokenWeight = numerator.div(denominator);
+      return ( oTokenWeight, weightSum.sub(oTokenWeight) );
   }
 
   /**
