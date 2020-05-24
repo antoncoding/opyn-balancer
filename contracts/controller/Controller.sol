@@ -60,8 +60,12 @@ contract Controller {
   /**
    * @dev After each trade: calculate new IV base on new spot price.
    */
-  function _post(uint _newSpotPrice) internal {
-    
+  function _post() internal {
+    uint256 _iv = _calculateImpliedVolatility();
+    if (iv < 0) {
+      iv = 0;
+    }
+    iv = _iv;
   }
 
   /**
@@ -82,7 +86,7 @@ contract Controller {
       _approve(tokenIn, address(pool), tokenAmountIn);
       (uint _tokenAmountOut, uint _spotPriceAfter) = pool.swapExactAmountIn(tokenIn, tokenAmountIn, tokenOut, minAmountOut, maxPrice);
       _pushToken(tokenOut, msg.sender, _tokenAmountOut);
-      _post(_spotPriceAfter);
+      _post();
       pool.setPublicSwap(false);
       return (_tokenAmountOut, _spotPriceAfter);
     }
@@ -139,7 +143,7 @@ contract Controller {
       uint256 spot = pool.getSpotPrice(USDC, oToken);
       uint256 usdcPrice = oracle.getPrice(USDC); // usdc price in wei
       uint256 ethPrice = uint256(10**(ethDecimals + usdcDecimals)).div(usdcPrice); // 206120000
-      uint256 timeTilExpiry = expiry.sub(block.timestamp); //
+      uint256 timeTilExpiry = expiry.sub(block.timestamp);
       _iv = _approximatePutIV(spot, strikePrice, ethPrice, timeTilExpiry);
   }
 
