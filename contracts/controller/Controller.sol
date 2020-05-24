@@ -10,21 +10,32 @@ contract Controller {
   using SafeMath for uint256;
 
   uint256 public iv;
-  uint256 public usdcDecimals;
+  uint256 public usdcDecimals = 6;
+  uint256 public ethDecimals = 18;
+  uint256 public ivDecimals = 10;
 
   address public USDC;
+  address public oToken;
+
   uint256 public strikePrice;
   uint256 public expiry;
   
   IBPool public pool;
   ICompoundOracle public oracle;
 
-  function init(IBPool _pool, ICompoundOracle _oracle, uint256 _strikePrice, uint256 _expiry, address _usdc_address) public {
+  function init(IBPool _pool, 
+      ICompoundOracle _oracle, 
+      uint256 _strikePrice, 
+      uint256 _expiry, 
+      address _usdc_address,
+      address _oToken
+    ) public {
     pool = _pool;
     oracle = _oracle;
     strikePrice = _strikePrice;
     expiry = _expiry;
     USDC = _usdc_address;
+    oToken = _oToken;
     usdcDecimals = 6;
   }
 
@@ -34,7 +45,7 @@ contract Controller {
   function _pre() internal {
     // calculate target price
     uint256 newPrice = _calculateOptionPrice();
-
+    
 
     // update fee
     uint256 newSwapFee = _calculateFee();
@@ -74,18 +85,44 @@ contract Controller {
   /**
    * @dev calculate option price based on timestamp and current eth price.
    */
-  function _calculateOptionPrice()
+   function _calculateOptionPrice()
     // internal
     public
     view 
     returns ( uint256 optionPrice ) {
       uint256 usdcPrice = oracle.getPrice(USDC); // usdc price in wei
-      uint256 ethPrice = uint256(10**18).mul(10**usdcDecimals).div(usdcPrice);
+      uint256 ethPrice = uint256(10**(ethDecimals + usdcDecimals)).div(usdcPrice); // 206120000
 
       uint256 timeTilExpiry = expiry.sub(block.timestamp); //
-      optionPrice = _approximatePrice(strikePrice, ethPrice, timeTilExpiry, iv);
+      optionPrice = _approximatePutPrice( strikePrice,  ethPrice, timeTilExpiry, iv);
   }
 
+  /**
+   * @dev price = 0.4 * (s - ((x-s)/2) ) * iv * t**(1/2) + (x-s)/2
+   * @param x strke price
+   * @param spot spot price of eth
+   * @param t time til expiry in sec
+   * @param v implied volatility
+   */
+  function _approximatePutPrice(uint256 x, uint256 spot, uint256 t, uint256 v) 
+    public
+    view
+    // internal 
+    returns ( uint256 price ) {
+      uint256 sqrtT = _nthRoot(t, 2, 0, 100);
+      uint256 divider = uint256(14040 * 10**(ivDecimals));
+      
+      if (x > spot) {
+          uint256 d = x.sub(spot).div(2); 
+          uint256 avg = spot.sub(d);
+          return avg.mul(v).mul(sqrtT).div(divider).add(d);    
+      } else {
+          uint256 d = spot.sub(x).div(2); 
+          uint256 avg = x.sub(d);
+          return avg.mul(v).mul(sqrtT).div(divider).sub(d); 
+      }
+  }
+  
   /**
    * @dev calculate implied v based on new price
    */
@@ -94,10 +131,44 @@ contract Controller {
     public
     view 
     returns ( uint256 _iv ) {
-      uint256 usdcPrice = oracle.getPrice(USDC); // get price again after the trade
-      uint256 ethPrice = uint256(10**18).div(usdcPrice);
+      uint256 spot = pool.getSpotPrice(USDC, oToken);
+      uint256 usdcPrice = oracle.getPrice(USDC); // usdc price in wei
+      uint256 ethPrice = uint256(10**(ethDecimals + usdcDecimals)).div(usdcPrice); // 206120000
       uint256 timeTilExpiry = expiry.sub(block.timestamp); //
-      _iv = _approximateIV(strikePrice, ethPrice, timeTilExpiry, iv);
+      _iv = _approximatePutIV(spot, strikePrice, ethPrice, timeTilExpiry);
+  }
+
+  /**
+   * @dev reverse engineer put option iv from price
+   * @param p price of option
+   * @param x strke price
+   * @param spot spot price of eth
+   * @param t time til expiry in sec
+   */
+  function _approximatePutIV(uint256 p, uint256 x, uint256 spot, uint256 t) 
+    public
+    // internal 
+    view
+    returns ( uint256 )
+    {
+      uint256 sqrtT = _nthRoot(t, 2, 0, 100);
+      if (x > spot ){
+          uint256 d = x.sub(spot).div(2);
+          uint256 avg = spot.sub(d);
+          uint256 divider = sqrtT.mul(avg).div(uint256(14040));
+          return p
+            .sub(d)
+            .mul(10**ivDecimals)
+            .div(divider);    
+      } else {
+          uint256 d = spot.sub(x).div(2);
+          uint256 avg = x.sub(d);
+          uint256 divider = sqrtT.mul(avg).div(uint256(14040));
+          return p
+            .add(d)
+            .mul(10**ivDecimals)
+            .div(divider);    
+      }
   }
 
   function _calculateFee() 
@@ -106,43 +177,6 @@ contract Controller {
     returns ( uint256 newFee ) {
       newFee = 1000000000000000000; // 1%
   }
-
-  /**
-   * @dev price = 0.4 * (s - ((s-x)/2) ) * iv * t**(1/2) + (s-x)/2
-   * @param x strke price
-   * @param spot spot price of eth
-   * @param t time til expiry in sec
-   * @param v implied volatility
-   */
-  function _approximatePrice(uint256 x, uint256 spot, uint256 t, uint256 v) 
-    public
-    // internal 
-    pure
-    returns ( uint256 price ) {
-      uint256 d = spot.sub(x).div(2);
-      uint256 sqrtT = _nthRoot(t, 2, 0, 100);
-      return spot.sub(d).mul(v).mul(sqrtT).div(uint256(14040)).add(d);
-      // return uint256(0.4).mul(spot.sub(d)).mul(v).mul(sqrtT).div(uint256(5616)) + d;
-  }
-
-  /**
-   * @dev reverse engineer iv from price
-   * @param p price of option
-   * @param x strke price
-   * @param spot spot price of eth
-   * @param t time til expiry in sec
-   */
-  function _approximateIV(uint256 p, uint256 x, uint256 spot, uint256 t) 
-    public
-    // internal 
-    pure
-    returns ( uint256 price ) {
-      uint256 d = spot.sub(x).div(2);
-      uint256 sqrtT = _nthRoot(t, 2, 0, 100);
-      uint256 divider = sqrtT.mul(spot.sub(d)).div(uint256(14040));
-      return p.sub(d).div(divider);
-  }
-
 
   /**
    * @dev approve erc20 transfer
