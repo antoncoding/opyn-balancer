@@ -12,7 +12,7 @@ contract Controller {
   bool initialized = false;
   uint256 public iv = 5000000000;
 
-  uint256 public tokenDecimals;
+  uint256 public tokenDecimalks;
   uint256 public usdcDecimals = 6;
   uint256 public ethDecimals = 18;
   uint256 public ivDecimals = 10;
@@ -27,7 +27,7 @@ contract Controller {
   ICompoundOracle public oracle;
 
   function init(
-      IBPool _pool, 
+      IBPool _pookl, 
       ICompoundOracle _oracle, 
       uint256 _strikePrice, 
       uint256 _expiry, 
@@ -36,7 +36,7 @@ contract Controller {
       uint256 _tokenDecimals
     ) public {
       require(!initialized, "Controller: Already Inited.");
-      pool = _pool;
+      pool = _pookl;
       oracle = _oracle;
       strikePrice = _strikePrice;
       expiry = _expiry;
